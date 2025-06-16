@@ -1,17 +1,22 @@
 import os
 import tempfile
-import numpy as np
 from PIL import Image
 import pytesseract
 from gtts import gTTS
 from langdetect import detect
 import streamlit as st
-import cv2
 from functools import lru_cache
 
-# Braille mapping
+# Check if Hindi is installed
+def is_language_installed(lang_code='hin'):
+    tessdata_dir = os.environ.get('TESSDATA_PREFIX', '/usr/share/tesseract-ocr/4.00/tessdata')
+    return os.path.exists(os.path.join(tessdata_dir, f'{lang_code}.traineddata'))
+
+hindi_installed = is_language_installed('hin')
+
+# Braille character map (same as yours, truncated for brevity here)
 braille_map = {
-     'a': '⠁', 'b': '⠃', 'c': '⠉', 'd': '⠙', 'e': '⠑',
+    'a': '⠁', 'b': '⠃', 'c': '⠉', 'd': '⠙', 'e': '⠑',
     'f': '⠋', 'g': '⠛', 'h': '⠓', 'i': '⠊', 'j': '⠚',
     'k': '⠅', 'l': '⠇', 'm': '⠍', 'n': '⠝', 'o': '⠕',
     'p': '⠏', 'q': '⠟', 'r': '⠗', 's': '⠎', 't': '⠞',
@@ -49,6 +54,7 @@ braille_map = {
     "K": "⠅", "L": "⠇", "M": "⠍", "N": "⠝", "O": "⠕",
     "P": "⠏", "Q": "⠟", "R": "⠗", "S": "⠎", "T": "⠞",
     "U": "⠥", "V": "⠧", "W": "⠺", "X": "⠭", "Y": "⠽", "Z": "⠵",
+
 }
 
 @lru_cache(maxsize=128)
@@ -59,31 +65,26 @@ def resize_image(image, max_size=(1024, 1024)):
     image.thumbnail(max_size, Image.Resampling.LANCZOS)
     return image
 
-def preprocess_image(pil_image):
-    """Convert to grayscale and threshold to improve OCR."""
-    img_array = np.array(pil_image)
-    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    return Image.fromarray(thresh)
-
 def main():
-    st.title("🔤 Image Text Assistive App")
+    st.title("🖼️ Image Text Assistive - Hindi & English OCR")
 
     uploaded_file = st.file_uploader("📤 Upload an image", type=["png", "jpg", "jpeg"])
 
     if uploaded_file is not None:
-        # Open image
         img = Image.open(uploaded_file).convert("RGB")
         img = resize_image(img)
-        preprocessed_img = preprocess_image(img)
-
         st.image(img, caption="Uploaded Image", use_column_width=True)
 
-        # Language selection
-        lang_option = st.selectbox("🔍 Select OCR Language", ['eng', 'hin', 'eng+hin'])
-        extracted_text = pytesseract.image_to_string(preprocessed_img, lang=lang_option)
+        # Set OCR languages based on availability
+        lang_config = 'eng+hin' if hindi_installed else 'eng'
 
-        # Detect language (fallback to English)
+        extracted_text = pytesseract.image_to_string(img, lang=lang_config)
+
+        if not hindi_installed:
+            st.warning("⚠️ Hindi OCR is not enabled. Only English text will be extracted.\n\n"
+                       "To enable Hindi, install it using:\n\n```sudo apt install tesseract-ocr-hin```")
+
+        # Detect language
         try:
             detected_lang = detect(extracted_text)
         except:
@@ -92,21 +93,20 @@ def main():
         gtts_lang = 'hi' if detected_lang == 'hi' else 'en'
 
         # Braille conversion
+        braille_body = text_to_braille(extracted_text)
         braille_prefix = '⠰⠓ ' if gtts_lang == 'hi' else '⠰⠑ '
-        braille_text = braille_prefix + text_to_braille(extracted_text)
+        braille_text = braille_prefix + braille_body
 
-        # Display results
-        st.subheader("📄 Extracted Text")
+        st.subheader("📝 Extracted Text")
         st.write(extracted_text)
 
-        st.subheader("⠿ Braille Translation")
+        st.subheader("⠃ Braille Translation")
         st.text(braille_text)
 
-        # TTS audio
+        # Text to Speech
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_audio:
             tts = gTTS(text=extracted_text, lang=gtts_lang)
             tts.save(tmp_audio.name)
-            st.subheader("🔊 Text-to-Speech")
             st.audio(tmp_audio.name, format="audio/mp3")
 
 if __name__ == "__main__":
